@@ -6,7 +6,7 @@ import bmesh
 import mathutils
 
 from .lib import Quadwild, QWException
-from .util import bisect, exporter, importer
+from .util import bisect, exporter, importer, transfer
 
 
 class QREMESH_OT_Remesh(bpy.types.Operator):
@@ -15,6 +15,9 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
     bl_label = "Remesh"
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def poll(cls, ctx):
+        return ctx.mode == 'OBJECT'
 
     def execute(self, ctx):
         props = ctx.scene.quadwild_props
@@ -37,15 +40,38 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
             self.report({'ERROR_INVALID_INPUT'}, "Mesh has 0 faces")
             return {'CANCELLED'}
 
-        original_location = obj.location
+        original_location = obj.location.copy()
 
-        mesh_filename = "".join(c if c not in "\/:*?<>|" else "_" for c in obj.name).strip()
+        mesh_filename = "".join(c if c not in "\\/:*?<>|" else "_" for c in obj.name).strip()
         mesh_filepath = f"{os.path.join(bpy.app.tempdir, mesh_filename)}.obj"
         self.report({'DEBUG'}, f"Remeshing from {mesh_filepath}")
+
+        # The solver libraries run inside Blender's process: a native crash takes
+        # the whole application down with it. A backup copy is cheap insurance.
+        if bpy.data.filepath:
+            if bpy.data.is_dirty:
+                backup_path = f"{os.path.splitext(bpy.data.filepath)[0]}_qremesh_bak.blend"
+                try:
+                    bpy.ops.wm.save_as_mainfile(filepath=backup_path, copy=True)
+                    self.report({'INFO'}, f"Backup saved to {backup_path}")
+                except RuntimeError as e:
+                    self.report({'WARNING'}, f"Could not save backup: {e}")
+        else:
+            self.report({'WARNING'}, "File has never been saved — a crash during remesh would lose your work")
 
         # Load lib
         qw = Quadwild(mesh_filepath)
 
+        # Use Cache skips straight to quadrangulation, which reads files produced
+        # by a previous full run. Handing missing paths to the solver crashes
+        # Blender, so refuse early with a clear message instead.
+        if props.useCache and not os.path.isfile(qw.traced_path):
+            self.report({'ERROR_INVALID_INPUT'},
+                        f"No cached files found for '{obj.name}' — run once with Use Cache disabled first")
+            return {'CANCELLED'}
+
+        bm = None
+        evaluated_obj = None
         try:
             if not props.useCache:
                 # Get mesh after modifiers and shapekeys applied
@@ -113,7 +139,7 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                     new_obj.hide_set(True)
 
             # Convert to quads
-            qw.quadrangulate(
+            solver_result = qw.quadrangulate(
                 props.enableSmoothing,
                 qr_props.scaleFact,
                 qr_props.fixedChartClusters,
@@ -149,6 +175,10 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
 
             # Import final OBJ
             final_mesh_path = qw.output_smoothed_path if props.enableSmoothing else qw.output_path
+            if not os.path.isfile(final_mesh_path):
+                raise QWException(
+                    f"Quadrangulation produced no output (solver returned {solver_result}) — "
+                    "try different settings, or disable Use Cache if the mesh has changed")
             final_mesh = importer.import_mesh(final_mesh_path)
             final_obj = bpy.data.objects.new(f"{obj.name} Remeshed", final_mesh)
             bpy.context.collection.objects.link(final_obj)
@@ -157,6 +187,14 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
 
             # Set object location
             final_obj.location = original_location
+
+            # Carry materials, UVs, weights and rig binding over from the
+            # original — must happen before the original is hidden
+            if props.transferData:
+                transfer.copy_materials(obj, final_obj)
+                if transfer.transfer_uv_and_weights(obj, final_obj) is False:
+                    self.report({'WARNING'}, "Could not apply Data Transfer modifier — left unapplied on the result")
+                transfer.copy_rig(obj, final_obj)
 
             # Add Mirror modifier for symmetry
             if props.symmetryX or props.symmetryY or props.symmetryZ:
@@ -172,15 +210,18 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
             obj.hide_set(True)
 
         except QWException as e:
-            self.report({'ERROR'}, repr(e))
-
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Unexpected error: {e!r}")
+            return {'CANCELLED'}
         finally:
             # Cleanup
             del qw
 
-            if not props.useCache:
+            if bm is not None:
                 bm.free()
-                del bm
+            if evaluated_obj is not None:
                 evaluated_obj.to_mesh_clear()
 
         return {'FINISHED'}

@@ -83,14 +83,22 @@ class Quadwild():
             self.quadwild.remeshAndField2(byref(params), mesh_filename_c, sharp_filename_c, field_filename_c)
         except Exception as e:
             raise QWException("remeshAndField failed") from e
+        # The solver reports nothing back — the output file is the only witness
+        if not path.isfile(self.remeshed_path):
+            raise QWException(
+                "remeshAndField produced no output — the input mesh may have issues "
+                "(non-manifold edges, loose geometry, degenerate faces)")
 
     def trace(self) -> bool:
         remeshed_path_without_ext, _ = path.splitext(self.remeshed_path)
         filename_prefix_c = create_string(remeshed_path_without_ext)
         try:
-            return self.quadwild.trace2(filename_prefix_c)
+            ok = self.quadwild.trace2(filename_prefix_c)
         except Exception as e:
             raise QWException("trace failed") from e
+        if not ok or not path.isfile(self.traced_path):
+            raise QWException("trace failed — the solver could not trace patches over the field")
+        return ok
 
     def quadrangulate(
             self,
