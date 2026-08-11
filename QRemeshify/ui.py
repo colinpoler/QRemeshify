@@ -25,6 +25,7 @@ class QREMESH_PT_UIPanel(BasePanel, Panel):
         col = layout.column(heading="Enable")
         col.prop(props, "enableRemesh")
         col.prop(props, "enableSmoothing")
+        col.prop(props, "transferData")
 
         layout.separator(factor=0.1)
 
