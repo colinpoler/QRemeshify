@@ -5,10 +5,10 @@ from bpy.props import *
 class QWPropertyGroup(PropertyGroup):
     debug:              BoolProperty(name="Debug Mode", description="Show meshes from intermediate steps", default=False)
     useCache:           BoolProperty(name="Use Cache", description="Reuses previously calculated features and only runs quadrangulate step. Must run all steps at least once before enabling this.\n(May be out of sync if mesh has been modified)", default=False)
-    enableRemesh:       BoolProperty(name="Preprocess", description="Decimates, triangulates, and tries to fix common geometry issues", default=True)
+    enableRemesh:       BoolProperty(name="Preprocess", description="Blender Decimate (0.5 collapse), protecting sharp, seam, material and face-set boundary vertices", default=True)
     enableSmoothing:    BoolProperty(name="Smoothing", description="Performs smoothing after quadrangulation", default=True)
     transferData:       BoolProperty(name="Keep Data", description="Copy materials, UV maps, vertex group weights, parenting and Armature modifiers from the original onto the remeshed result", default=True)
-    enableSharp:        BoolProperty(name="Sharp Detection", description="Enable detection of sharp features from edges marked sharp, seams, and from angle threshold", default=True)
+    enableSharp:        BoolProperty(name="Sharp Detection", description="Detect sharp edges, seams, angle threshold, boundaries, and different material or face sets", default=True)
     sharpAngle:         FloatProperty(name="Angle Threshold", description="Angle threshold for sharp edges", min=0, soft_min=0.1, max=180, soft_max=179.9, default=35, precision=1, step=10, subtype="UNSIGNED")
     symmetryX:          BoolProperty(name="X", description="Enable symmetry in X-axis", default=False)
     symmetryY:          BoolProperty(name="Y", description="Enable symmetry in Y-axis", default=False)

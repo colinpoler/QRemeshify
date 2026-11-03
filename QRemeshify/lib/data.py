@@ -66,7 +66,7 @@ def create_default_QRParameters():
     params = QRParameters()
 
     # Possibly unused
-    params.initialRemeshing = True
+    params.initialRemeshing = False  # Never remesh again inside QuadWild.
     params.initialRemeshingEdgeFactor = 1
     params.reproject = True
     params.splitConcaves = False

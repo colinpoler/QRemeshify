@@ -1,17 +1,34 @@
 import bmesh
+import math
+
+
+def is_sharp_feature(edge, sharp_angle, face_set_layer) -> bool:
+    """Use the same feature definition for protected vertices and exported edges."""
+    if edge.is_wire:
+        return False
+    if not edge.smooth or edge.seam or edge.is_boundary:
+        return True
+    if len(edge.link_faces) > 1:
+        if math.degrees(edge.calc_face_angle(0)) > sharp_angle:
+            return True
+        if len({face.material_index for face in edge.link_faces}) > 1:
+            return True
+        if face_set_layer is not None and len({face[face_set_layer] for face in edge.link_faces}) > 1:
+            return True
+    return False
 
 
 def export_sharp_features(bm: bmesh.types.BMesh, sharp_filepath: str, sharp_angle: float=35) -> int:
-    """Export edges marked sharp, boundary, and seams as sharp features as OBJ format"""
+    """Export sharp, seam, angle, boundary, and face-set feature edges."""
 
     sharp_edges = []
     bm.edges.index_update()
+    bm.faces.index_update()
     bm.edges.ensure_lookup_table()
+    face_set_layer = bm.faces.layers.int.get('.sculpt_face_set')
 
     for edge in bm.edges:
-        if edge.is_wire:
-            continue
-        if not edge.smooth:
+        if is_sharp_feature(edge, sharp_angle, face_set_layer):
             convexity = 1 if edge.is_convex else 0
             face = edge.link_faces[0]
             face_index = face.index

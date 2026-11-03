@@ -1,5 +1,4 @@
 import os
-import math
 
 import bpy
 import bmesh
@@ -95,24 +94,50 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                 if props.symmetryX or props.symmetryY or props.symmetryZ:
                     bisect.bisect_on_axes(bm, props.symmetryX, props.symmetryY, props.symmetryZ)
 
-                # Find edges to mark as sharp
-                if props.enableSharp:
-                    face_set_data_layer = bm.faces.layers.int.get('.sculpt_face_set')
-                    bm.edges.ensure_lookup_table()
-                    for edge in bm.edges:
-                        is_sharp = math.degrees(edge.calc_face_angle(0)) > props.sharpAngle
-                        is_material_boundary = len(edge.link_faces) > 1 and edge.link_faces[0].material_index != edge.link_faces[1].material_index
-                        is_face_set_boundary = (
-                            face_set_data_layer is not None and
-                            len(edge.link_faces) > 1 and
-                            edge.link_faces[0][face_set_data_layer] != edge.link_faces[1][face_set_data_layer]
-                        )
-
-                        if is_sharp or edge.is_boundary or edge.seam or is_material_boundary or is_face_set_boundary:
+                # Mark feature edges and select their vertices for protected decimation.
+                bm.verts.index_update()
+                face_set_layer = bm.faces.layers.int.get('.sculpt_face_set')
+                sharp_vertices = set()
+                for edge in bm.edges:
+                    if exporter.is_sharp_feature(edge, props.sharpAngle, face_set_layer):
+                        edge.select_set(True)
+                        for vert in edge.verts:
+                            vert.select_set(True)
+                            sharp_vertices.add(vert.index)
+                        if props.enableSharp:
                             edge.smooth = False
+
+                if props.enableRemesh:
+                    # Decimate a temporary Blender object, never the user's source mesh.
+                    prep_mesh = bpy.data.meshes.new("QRemeshify Preprocess")
+                    prep_obj = None
+                    try:
+                        bm.to_mesh(prep_mesh)
+                        prep_obj = bpy.data.objects.new("QRemeshify Preprocess", prep_mesh)
+                        ctx.collection.objects.link(prep_obj)
+                        sharp_group = prep_obj.vertex_groups.new(name="qremeshify_sharp_vertices")
+                        if sharp_vertices:
+                            sharp_group.add(sorted(sharp_vertices), 1.0, 'REPLACE')
+                        decimate = prep_obj.modifiers.new("QRemeshify Decimate", 'DECIMATE')
+                        decimate.decimate_type = 'COLLAPSE'
+                        decimate.ratio = 0.5
+                        decimate.vertex_group = sharp_group.name
+                        decimate.invert_vertex_group = True
+                        prep_eval = prep_obj.evaluated_get(depsgraph)
+                        prep_eval_mesh = prep_eval.to_mesh()
+                        try:
+                            bm.clear()
+                            bm.from_mesh(prep_eval_mesh)
+                        finally:
+                            prep_eval.to_mesh_clear()
+                    finally:
+                        if prep_obj is not None:
+                            bpy.data.objects.remove(prep_obj, do_unlink=True)
+                        bpy.data.meshes.remove(prep_mesh)
 
                 # Triangulate mesh
                 bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='SHORT_EDGE', ngon_method='BEAUTY')
+                bm.verts.index_update()
 
                 # Export selected object as OBJ
                 exporter.export_mesh(bm, mesh_filepath)
@@ -123,7 +148,7 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                     self.report({'DEBUG'}, f"Found {num_sharp_features} sharp edges")
 
                 # Remesh and calculate field
-                qw.remeshAndField(remesh=props.enableRemesh, enableSharp=props.enableSharp, sharpAngle=props.sharpAngle)
+                qw.remeshAndField(enableSharp=props.enableSharp, sharpAngle=props.sharpAngle)
                 if props.debug:
                     new_mesh = importer.import_mesh(qw.remeshed_path)
                     new_obj = bpy.data.objects.new(f"{obj.name} remeshAndField", new_mesh)

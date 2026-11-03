@@ -47,9 +47,9 @@ Please remember to save often, time taken for remeshing is dependent on many fac
 # Settings
 | Option | Description | Performance Impact |
 | --- | --- | --- |
-| Preprocess | Runs QuadWild's built-in decimation, triangulation, and attempt to fix common geometry issues | High |
+| Preprocess | Uses Blender Decimate (0.5 collapse ratio) outside protected feature vertices; native preprocessing is disabled | High |
 | Smoothing | Smooths topology after quadrangulation | High |
-| Detect Sharp | Generates sharp features from edges above the threshold, from edges marked sharp, and edges marked seam | Low |
+| Detect Sharp | Exports sharp-marked edges, seams, angles above threshold, and material/face-set boundaries | Low |
 | Symmetry | Produce symmetrical topology along specified axes | Shortens time taken since less geometry is processed |
 
 ## Advanced Settings
@@ -75,9 +75,10 @@ Find and share more tips at [Discussions](https://github.com/ksami/QRemeshify/di
 flowchart TD
     Start --> B{Use cache?}
     B -->|False| C[Cut mesh in half on specified axes for symmetry]
-    C -.-> D([mesh.obj])
+    C --> P[Optional Blender Decimate, protecting feature vertices]
+    P -.-> D([mesh.obj])
     D --> E[Calculate sharp features]
-    E --> G[[QuadWild built-in preprocessing and field calculation]]
+    E --> G[[QuadWild field calculation without native remeshing]]
     D --> G
     G -.-> H([mesh_rem.obj])
     H --> I[[QuadWild field tracing and splitting into patches]]

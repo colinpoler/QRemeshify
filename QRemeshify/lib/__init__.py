@@ -67,9 +67,9 @@ class Quadwild():
         self.output_smoothed_path = f'{self.mesh_path_without_ext}_rem_p0_0_quadrangulation_smooth.obj'
 
 
-    def remeshAndField(self, remesh: bool, enableSharp: bool, sharpAngle: float) -> None:
+    def remeshAndField(self, enableSharp: bool, sharpAngle: float) -> None:
         params = Parameters(
-            remesh=remesh,
+            remesh=False,  # Preprocessing is handled by Blender's protected Decimate modifier.
             sharpAngle=sharpAngle if enableSharp else -1,
             hasFeature=enableSharp,
             hasField=False,
