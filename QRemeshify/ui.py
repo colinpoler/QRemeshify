@@ -26,6 +26,12 @@ class QREMESH_PT_UIPanel(BasePanel, Panel):
         col.prop(props, "enableRemesh")
         col.prop(props, "enableSmoothing")
         col.prop(props, "transferData")
+        if props.transferData:
+            options = layout.box()
+            options.prop(props, "keepUV")
+            options.prop(props, "keepVertexGroups")
+            options.prop(props, "keepEdgeOverlays")
+            options.prop(props, "keepMaterials")
 
         layout.separator(factor=0.1)
 

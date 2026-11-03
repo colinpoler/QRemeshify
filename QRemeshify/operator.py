@@ -213,18 +213,37 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
             # Set object location
             final_obj.location = original_location
 
-            # Carry materials, UVs, weights and rig binding over from the
-            # original — must happen before the original is hidden
-            if props.transferData:
-                transfer.copy_materials(obj, final_obj)
-                if transfer.transfer_uv_and_weights(obj, final_obj) is False:
-                    self.report({'WARNING'}, "Could not apply Data Transfer modifier — left unapplied on the result")
-                transfer.copy_rig(obj, final_obj)
+            # Transfer against the evaluated, bisected half before mirroring;
+            # never match attributes against the opposite symmetry half.
+            if props.transferData and any((props.keepUV, props.keepVertexGroups,
+                                           props.keepEdgeOverlays, props.keepMaterials)):
+                axes = (props.symmetryX, props.symmetryY, props.symmetryZ)
+                transfer_source = None
+                try:
+                    if any(axes):
+                        transfer_source = transfer.make_bisected_transfer_source(obj, ctx, axes)
+                    source = transfer_source if transfer_source is not None else obj
+                    # Each data category is independent and runs on the
+                    # unmirrored result using only the (possibly bisected) source.
+                    if props.keepMaterials:
+                        transfer.transfer_materials(source, final_obj)
+                    if props.keepVertexGroups:
+                        if not transfer.transfer_vertex_groups(source, final_obj):
+                            self.report({'WARNING'}, "Could not apply vertex-group Data Transfer modifier")
+                        transfer.copy_rig(obj, final_obj)
+                    if props.keepEdgeOverlays:
+                        transfer.transfer_edge_overlays(source, final_obj)
+                    if props.keepUV:
+                        transfer.transfer_uvs(source, final_obj)
+                finally:
+                    if transfer_source is not None:
+                        source_mesh = transfer_source.data
+                        bpy.data.objects.remove(transfer_source, do_unlink=True)
+                        bpy.data.meshes.remove(source_mesh)
 
-            # Add Mirror modifier for symmetry
+            # Add Mirror only after all transfers have completed. Leave it live.
             if props.symmetryX or props.symmetryY or props.symmetryZ:
                 mirror_modifier = final_obj.modifiers.new("Mirror", "MIRROR")
-
                 mirror_modifier.use_axis[0] = props.symmetryX
                 mirror_modifier.use_axis[1] = props.symmetryY
                 mirror_modifier.use_axis[2] = props.symmetryZ
