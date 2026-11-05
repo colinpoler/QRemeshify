@@ -5,7 +5,7 @@ import bmesh
 import mathutils
 
 from .lib import Quadwild, QWException
-from .util import bisect, exporter, importer, transfer
+from .util import bisect, exporter, importer, transfer, density
 
 
 class QREMESH_OT_Remesh(bpy.types.Operator):
@@ -172,6 +172,15 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                     new_obj = bpy.data.objects.new(f"{obj.name} trace", new_mesh)
                     bpy.context.collection.objects.link(new_obj)
                     new_obj.hide_set(True)
+
+            # QuadWild patch IDs are only available after tracing. Refresh the
+            # scales even on cache hits, so repainting density needs no retrace.
+            density_count = density.write_patch_scales(
+                qw.traced_path, obj, ctx.evaluated_depsgraph_get(),
+                transfer._rot_scale_matrix(obj),
+                (props.symmetryX, props.symmetryY, props.symmetryZ))
+            if density_count:
+                self.report({'INFO'}, f"Painted density applied to {density_count} patches")
 
             # Convert to quads
             solver_result = qw.quadrangulate(
