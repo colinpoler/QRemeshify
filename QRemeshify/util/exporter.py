@@ -2,11 +2,12 @@ import bmesh
 import math
 
 
-def is_sharp_feature(edge, sharp_angle, face_set_layer) -> bool:
+def is_sharp_feature(edge, sharp_angle, face_set_layer, freestyle_layer=None) -> bool:
     """Use the same feature definition for protected vertices and exported edges."""
     if edge.is_wire:
         return False
-    if not edge.smooth or edge.seam or edge.is_boundary:
+    if (not edge.smooth or edge.seam or edge.is_boundary
+            or (freestyle_layer is not None and edge[freestyle_layer])):
         return True
     if len(edge.link_faces) > 1:
         if math.degrees(edge.calc_face_angle(0)) > sharp_angle:
@@ -26,9 +27,10 @@ def export_sharp_features(bm: bmesh.types.BMesh, sharp_filepath: str, sharp_angl
     bm.faces.index_update()
     bm.edges.ensure_lookup_table()
     face_set_layer = bm.faces.layers.int.get('.sculpt_face_set')
+    freestyle_layer = bm.edges.layers.int.get("qremeshify_freestyle")
 
     for edge in bm.edges:
-        if is_sharp_feature(edge, sharp_angle, face_set_layer):
+        if is_sharp_feature(edge, sharp_angle, face_set_layer, freestyle_layer):
             convexity = 1 if edge.is_convex else 0
             face = edge.link_faces[0]
             face_index = face.index

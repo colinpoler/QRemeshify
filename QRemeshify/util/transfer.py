@@ -40,15 +40,47 @@ def transfer_materials(src_obj: bpy.types.Object, dst_obj: bpy.types.Object) -> 
     bm.free()
 
 
+def freestyle_edge_marks(mesh):
+    """Read Freestyle edge marks on both legacy and attribute-based Blender APIs."""
+    attribute = mesh.attributes.get("freestyle_edge")
+    if attribute is not None:
+        return [item.value for item in attribute.data]
+    return [getattr(edge, "use_freestyle_mark", False) for edge in mesh.edges]
+
+
+def _set_freestyle_marks(mesh, marks):
+    """Write marks through the supported edge API for this Blender version."""
+    attr = mesh.attributes.get("freestyle_edge")
+    if attr is None and mesh.edges and not hasattr(mesh.edges[0], "use_freestyle_mark"):
+        attr = mesh.attributes.new("freestyle_edge", 'BOOLEAN', 'EDGE')
+    for edge, marked in zip(mesh.edges, marks):
+        if attr is not None:
+            attr.data[edge.index].value = bool(marked)
+        else:
+            edge.use_freestyle_mark = bool(marked)
+
+
 def transfer_edge_overlays(src_obj: bpy.types.Object, dst_obj: bpy.types.Object) -> None:
-    """Copy seam and sharp flags from aligned nearest-midpoint source edges.
+    """Copy seam, sharp and Freestyle flags from aligned nearest-midpoint edges.
 
     KD-tree midpoint queries run in native code. An absolute cosine threshold
     of 0.7 rejects crossed edges while accepting reversed edge directions.
     """
+    source_marks = freestyle_edge_marks(src_obj.data)
+    # Blender 5.x stores Freestyle as a boolean EDGE attribute; older versions
+    # expose MeshEdge.use_freestyle_mark instead.
+    target_attribute = dst_obj.data.attributes.get("freestyle_edge")
+    if (target_attribute is None and dst_obj.data.edges
+            and not hasattr(dst_obj.data.edges[0], "use_freestyle_mark")):
+        target_attribute = dst_obj.data.attributes.new("freestyle_edge", 'BOOLEAN', 'EDGE')
     for destination, source in _matched_edges(src_obj, dst_obj):
         destination.use_seam = source.use_seam
         destination.use_edge_sharp = source.use_edge_sharp
+        marked = bool(source_marks[source.index])
+        if target_attribute is not None:
+            target_attribute.data[destination.index].value = marked
+        else:
+            destination.use_freestyle_mark = marked
     dst_obj.data.update()
 
 
@@ -217,11 +249,22 @@ def make_bisected_transfer_source(src_obj, ctx, axes):
     bm = bmesh.new()
     try:
         bm.from_mesh(evaluated_mesh)
+        # BMesh's legacy Freestyle layer is not accessible in Blender 4.x.
+        # An ordinary integer layer survives the symmetry bisect instead.
+        freestyle_layer = bm.edges.layers.int.get("qremeshify_freestyle")
+        if freestyle_layer is None:
+            freestyle_layer = bm.edges.layers.int.new("qremeshify_freestyle")
+        for edge, marked in zip(bm.edges, freestyle_edge_marks(evaluated_mesh)):
+            edge[freestyle_layer] = int(marked)
         bmesh.ops.transform(bm, matrix=_rot_scale_matrix(src_obj), verts=bm.verts)
         bisect.bisect_on_axes(bm, *axes)
         mesh = bpy.data.meshes.new("QRemeshify Transfer Source")
         try:
             bm.to_mesh(mesh)
+            marks_layer = mesh.attributes.get("qremeshify_freestyle")
+            if marks_layer is not None:
+                _set_freestyle_marks(mesh, [bool(item.value) for item in marks_layer.data])
+                mesh.attributes.remove(marks_layer)
             for material in src_obj.data.materials:
                 mesh.materials.append(material)
             mesh.update()

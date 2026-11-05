@@ -82,6 +82,15 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                 # (won't affect mesh, unless explicitly written back)
                 bm = bmesh.new()
                 bm.from_mesh(mesh)
+                # Freestyle is not exposed reliably by BMesh's legacy edge API.
+                # Preserve marks in an integer edge layer across bisect/decimate.
+                freestyle_layer = bm.edges.layers.int.get("qremeshify_freestyle")
+                if freestyle_layer is None:
+                    freestyle_layer = bm.edges.layers.int.new("qremeshify_freestyle")
+                for edge, marked in zip(bm.edges, transfer.freestyle_edge_marks(mesh)):
+                    edge[freestyle_layer] = int(marked)
+                    if marked and props.enableSharp:
+                        edge.smooth = False  # Treat Freestyle as a QuadWild feature.
 
                 # Apply only rotation and scale
                 if evaluated_obj.rotation_mode == 'QUATERNION':
@@ -97,9 +106,10 @@ class QREMESH_OT_Remesh(bpy.types.Operator):
                 # Mark feature edges and select their vertices for protected decimation.
                 bm.verts.index_update()
                 face_set_layer = bm.faces.layers.int.get('.sculpt_face_set')
+                freestyle_layer = bm.edges.layers.int.get("qremeshify_freestyle")
                 sharp_vertices = set()
                 for edge in bm.edges:
-                    if exporter.is_sharp_feature(edge, props.sharpAngle, face_set_layer):
+                    if exporter.is_sharp_feature(edge, props.sharpAngle, face_set_layer, freestyle_layer):
                         edge.select_set(True)
                         for vert in edge.verts:
                             vert.select_set(True)
